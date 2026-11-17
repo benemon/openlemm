@@ -525,24 +525,28 @@ func (g *Game) Start() int { return g.shown }
 // update's click: the latest released that is only working, unless the right button is held;
 // otherwise the latest of the rest.
 func (g *Game) choose() {
-	in := g.read
-	busy := -1
-	g.other, g.count = -1, 0
+	g.chosen, g.other, g.count = g.choice(g.read)
+}
+
+// choice returns the lemming choose would pick with the pointer at in, the best not only working,
+// and how many lemmings are under it.
+func (g *Game) choice(in Input) (chosen, other, count int) {
+	busy, other := -1, -1
 	for i, l := range g.Lemmings {
 		if l.Removed || in.X < l.X-5 || in.X > l.X+4 || in.Y < l.Y-11 || in.Y > l.Y {
 			continue
 		}
-		g.count++
+		count++
 		if l.State != 0 && l.State&^working == 0 {
 			busy = i
 		} else {
-			g.other = i
+			other = i
 		}
 	}
-	g.chosen = g.other
 	if busy >= 0 && !in.Right {
-		g.chosen = busy
+		return busy, other, count
 	}
+	return other, other, count
 }
 
 // tick runs the level clock for one display frame.
@@ -575,6 +579,12 @@ func (g *Game) Selected() Skill { return g.selected }
 // release and its pointer step, which reads Input. Between Steps the game is where the oracle
 // observes it: released and input acted on, not yet moved.
 func (g *Game) Step() {
+	g.finish()
+	g.begin()
+}
+
+// finish moves every lemming and ends the update with its choice of lemming under the pointer.
+func (g *Game) finish() {
 	g.Sounds = g.Sounds[:0]
 	if !g.paused {
 		for range framesPerUpdate {
@@ -614,7 +624,10 @@ func (g *Game) Step() {
 		g.ending = true
 		g.music = g.Volume
 	}
+}
 
+// begin starts the next update with its release and its pointer step, which reads Input.
+func (g *Game) begin() {
 	g.shown = g.start
 	g.Update++
 	g.keys()
