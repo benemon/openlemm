@@ -4,6 +4,7 @@
 [![CodeQL](https://github.com/benemon/openlemm/actions/workflows/codeql.yml/badge.svg)](https://github.com/benemon/openlemm/actions/workflows/codeql.yml)
 [![Scorecard](https://github.com/benemon/openlemm/actions/workflows/scorecard.yml/badge.svg)](https://github.com/benemon/openlemm/actions/workflows/scorecard.yml)
 [![govulncheck](https://github.com/benemon/openlemm/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/benemon/openlemm/actions/workflows/govulncheck.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/benemon/openlemm/badge)](https://securityscorecards.dev/viewer/?uri=github.com/benemon/openlemm)
 
 > **Independent community project.** OpenLemm is not affiliated with, maintained, supported or
 > endorsed by Sony Interactive Entertainment or the original game's developers and publishers.
