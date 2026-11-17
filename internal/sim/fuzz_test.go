@@ -52,8 +52,8 @@ func TestFuzzTraces(t *testing.T) {
 				m = "ok"
 			}
 			if sound == "ok" {
-				g.Step()
-				collect(g)
+				// The recording writes a request one update late, so none made in its final
+				// update is in it: the engine's requests there are not stepped or compared.
 				if compareSounds(t, name, got, want["music"]); t.Failed() {
 					return
 				}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,14 +36,14 @@ func diverge(name string, update, lemming int, field string, trace, sim any) str
 }
 
 // readInput returns the rows of an input fixture, failing with an UNSUPPORTED line when its header
-// is not the one the replay reads.
-func readInput(t *testing.T, name, file, header string) [][]string {
+// is not one of those the replay reads.
+func readInput(t *testing.T, name, file string, headers ...string) [][]string {
 	t.Helper()
 	b, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h, _, _ := strings.Cut(string(b), "\n"); strings.TrimSpace(h) != header {
+	if h, _, _ := strings.Cut(string(b), "\n"); !slices.Contains(headers, strings.TrimSpace(h)) {
 		t.Fatalf("UNSUPPORTED %s %s columns %s", name, filepath.Base(file), strings.TrimSpace(h))
 	}
 	return readCSV(t, file)
@@ -102,13 +103,19 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 
 	type pointer struct {
 		in     Input
-		chosen int // record index + 1, 0 for none
+		scroll int
+		chosen int  // record index + 1, 0 for none
+		c      bool // the pointer the original's choice read is known
+		cx, cy int
 	}
 	real := map[int]pointer{}
 	if _, err := os.Stat(filepath.Join(dir, name+".input")); err == nil {
-		for _, r := range readInput(t, stem, filepath.Join(dir, name+".input"), "update,x,y,buttons,scroll,chosen") {
-			var v [6]int
+		for _, r := range readInput(t, stem, filepath.Join(dir, name+".input"), "update,x,y,buttons,scroll,chosen", "update,x,y,buttons,scroll,chosen,cx,cy") {
+			var v [8]int
 			for k, s := range r {
+				if k >= 6 && s == "" {
+					continue
+				}
 				if v[k], err = strconv.Atoi(s); err != nil {
 					t.Fatalf("input %v: %v", r, err)
 				}
@@ -116,7 +123,8 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 			if v[3]&^1 != 0 {
 				t.Fatalf("UNSUPPORTED %s buttons %d", stem, v[3])
 			}
-			real[v[0]] = pointer{realInput(v[1], v[2], v[4], v[3]&1 != 0), v[5]}
+			c := len(r) == 8 && r[6] != "" && r[7] != ""
+			real[v[0]] = pointer{realInput(v[1], v[2], v[4], v[3]&1 != 0), v[4], v[5], c, v[6], v[7]}
 		}
 	}
 
@@ -139,12 +147,21 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 				if ok {
 					g.Input = p.in
 				}
-				g.Step()
+				g.finish()
+				chosen := g.chosen
+				if prev, ok := real[g.Update]; ok && p.c {
+					// The engine chooses with its own pointer sample; the original's choice can
+					// read a later one, so its rule is checked with the pointer the original read.
+					in := g.read
+					in.X, in.Y = p.cx+prev.scroll, p.cy+4
+					chosen, _, _ = g.choice(in)
+				}
+				g.begin()
 				for _, f := range each {
 					f(g)
 				}
-				if ok && g.chosen+1 != p.chosen {
-					t.Fatal(diverge(stem, g.Update, -1, "chosen", p.chosen-1, g.chosen))
+				if ok && chosen+1 != p.chosen {
+					t.Fatal(diverge(stem, g.Update, -1, "chosen", p.chosen-1, chosen))
 				}
 				for _, in := range inputs[g.Update] {
 					// The oracle forces assignments, lowering the count even from 0 to -1, past
