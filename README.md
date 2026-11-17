@@ -43,6 +43,13 @@ xattr -dr com.apple.quarantine openlemm_<version>_darwin_arm64
 Right-clicking `openlemm` in Finder and choosing **Open** also starts it, but may leave the
 library blocked, in which case the game plays without music until the command above is run.
 
+On macOS you can install with [Homebrew](https://brew.sh) instead, which also installs libopenmpt
+and needs no quarantine step:
+
+```sh
+brew install benemon/tap/openlemm
+```
+
 Each release is signed and comes with build provenance; see [SECURITY.md](SECURITY.md) for how to
 verify a download.
 

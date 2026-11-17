@@ -100,8 +100,17 @@ jobs:
         run: |
           .github/release-tools.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # goreleaser check fails on deprecated properties as well as invalid ones. brews, deprecated in favour of
+      # homebrew_casks, stays until the move is decided; any other finding fails the job.
       - name: Check the goreleaser configuration
-        run: goreleaser check
+        run: |
+          if out=$(goreleaser check 2>&1); then printf '%s\n' "$out"; exit 0; fi
+          printf '%s\n' "$out"
+          # goreleaser colours its output on the runner; the matches below read the plain text.
+          out=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+          printf '%s\n' "$out" | grep -q 'configuration is valid, but uses deprecated properties' || exit 1
+          if printf '%s\n' "$out" | grep 'DEPRECATED:' | grep -v -q 'DEPRECATED: *brews '; then exit 1; fi
+          echo "valid; brews is the only deprecated property"
       - name: Build a snapshot release
         run: goreleaser release --snapshot --clean --skip=sign
       - name: Compare the archives with the expected contents

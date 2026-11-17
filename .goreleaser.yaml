@@ -69,3 +69,30 @@ release:
   replace_existing_draft: true
   mode: keep-existing
   replace_existing_artifacts: true
+
+# Formula/openlemm.rb in benemon/homebrew-tap, for brew install benemon/tap/openlemm. goreleaser writes it to
+# dist/homebrew/Formula/openlemm.rb and pushes nothing: the formula's URLs only resolve once the draft release is
+# published, and goreleaser OSS cannot push it after that, so release.yml pushes it after publishing, for stable
+# releases only. It installs the program alone; Homebrew's libopenmpt is found at its prefix. The Linux program does
+# not look in Homebrew's Linux prefix, so the formula is macOS only, though goreleaser writes Linux URLs into it.
+# brews is deprecated in favour of homebrew_casks, which goreleaser check reports; ci.yml's release-build job accepts
+# that one deprecation.
+brews:
+  - name: openlemm
+    description: Engine that plays the Acorn Archimedes release of Lemmings™ from your own disc
+    homepage: https://github.com/benemon/openlemm
+    license: GPL-3.0-or-later
+    directory: Formula
+    repository:
+      owner: benemon
+      name: homebrew-tap
+      branch: main
+    skip_upload: "true"
+    dependencies:
+      - name: libopenmpt
+    custom_block: |
+      depends_on :macos
+    install: |
+      bin.install "openlemm"
+    test: |
+      assert_match "version=v#{version}", shell_output("#{bin}/openlemm -version")

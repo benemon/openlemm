@@ -1,8 +1,9 @@
 name: release
 
 # A v* tag is the release act. Tags with a hyphenated qualifier (v0.1.0-rc.1)
-# publish a prerelease. The build lives in .goreleaser.yaml, and ci.yml's
-# release-build job runs it as a snapshot on every change.
+# publish a prerelease, which the Homebrew formula skips. The build lives in
+# .goreleaser.yaml, and ci.yml's release-build job runs it as a snapshot on
+# every change.
 on:
   push:
     tags: ['v*']
@@ -45,6 +46,8 @@ jobs:
   publish:
     needs: libopenmpt
     runs-on: ubuntu-latest
+    outputs:
+      formula: ${{ steps.formula.outputs.formula }}
     permissions:
       contents: write      # release creation and asset upload
       id-token: write      # provenance attestation and keyless signing
@@ -70,6 +73,8 @@ jobs:
         run: |
           .github/release-tools.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # goreleaser builds, signs and uploads to a draft release, and writes the Homebrew formula to dist without pushing
+      # it.
       - name: Build, sign and upload the draft release
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -91,6 +96,46 @@ jobs:
         run: |
           case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
           gh release edit "$RELEASE_TAG" --draft=false
+      - name: Decide whether to push the Homebrew formula
+        id: formula
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          formula=true
+          case "$RELEASE_TAG" in (*-*) formula=false;; esac
+          echo "formula=$formula for $RELEASE_TAG"
+          echo "formula=$formula" >> "$GITHUB_OUTPUT"
+      # The formula is pushed over SSH, trusting only the host keys GitHub publishes, once the release its URLs name is
+      # public.
+      - name: Write GitHub's SSH host keys
+        if: ${{ steps.formula.outputs.formula == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/known_hosts"
+      # The deploy key has write access to benemon/homebrew-tap alone; without the secret the formula is left alone.
+      - name: Push the Homebrew formula
+        if: ${{ steps.formula.outputs.formula == 'true' }}
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_DEPLOY_KEY" ]; then echo "no HOMEBREW_TAP_DEPLOY_KEY; the formula is left alone"; exit 0; fi
+          case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
+          key="$RUNNER_TEMP/tap_deploy_key"
+          (umask 077 && printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$key")
+          export GIT_SSH_COMMAND="ssh -i $key -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
+          tap="$RUNNER_TEMP/homebrew-tap"
+          git clone --depth 1 --branch main git@github.com:benemon/homebrew-tap.git "$tap"
+          cp dist/homebrew/Formula/openlemm.rb "$tap/Formula/openlemm.rb"
+          git -C "$tap" add Formula/openlemm.rb
+          if git -C "$tap" diff --cached --quiet; then
+            echo "Formula/openlemm.rb already matches $RELEASE_TAG"
+          else
+            git -C "$tap" -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "openlemm $RELEASE_TAG"
+            git -C "$tap" push origin HEAD:main
+          fi
+          rm -f "$key"
 
   # Checks the published release as a player receives it, from the release alone: the assets against
   # .github/release-contents.txt, the checksums' signature, the checksums, and each archive's provenance.
@@ -141,3 +186,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: for archive in openlemm_*.tar.gz openlemm_*.zip; do gh attestation verify "$archive" -R benemon/openlemm; done
+
+  # Installs the release from the tap as the README does, on Apple silicon, and runs the formula's test, which checks
+  # the installed program's version. It runs only when publish pushed the formula.
+  verify-brew:
+    needs: publish
+    if: ${{ needs.publish.outputs.formula == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - name: Install openlemm from benemon/tap and test it
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
+          brew install benemon/tap/openlemm
+          installed=$(brew list --versions openlemm)
+          if [ "$installed" != "openlemm ${RELEASE_TAG#v}" ]; then
+            echo "benemon/tap installed $installed, not $RELEASE_TAG" >&2
+            exit 1
+          fi
+          brew test openlemm
