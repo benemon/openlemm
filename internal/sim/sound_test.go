@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -384,6 +385,40 @@ func TestSpeakerKey(t *testing.T) {
 	}
 }
 
+// readSounds returns a .sound fixture's requests by mode, each as update, sample and pitch.
+func readSounds(t *testing.T, file string) map[string][][3]int {
+	want := map[string][][3]int{}
+	for _, r := range readCSV(t, file) {
+		u, _ := strconv.Atoi(r[1])
+		w, _ := strconv.ParseUint(r[2], 16, 16)
+		want[r[0]] = append(want[r[0]], [3]int{u, int(w & 255), int(w >> 8)})
+	}
+	return want
+}
+
+// compareSounds fails with a diverge line at the first request in got that differs from want.
+func compareSounds(t *testing.T, name string, got, want [][3]int) {
+	t.Helper()
+	req := func(s [][3]int, i int) string {
+		if i >= len(s) {
+			return "none"
+		}
+		return fmt.Sprintf("%d:%02X%02X", s[i][0], s[i][2], s[i][1])
+	}
+	for i := range max(len(got), len(want)) {
+		if i >= len(got) || i >= len(want) || got[i] != want[i] {
+			var u int
+			if i < len(want) {
+				u = want[i][0]
+			} else {
+				u = got[i][0]
+			}
+			t.Error(diverge(name, u, -1, "sound", req(want, i), req(got, i)))
+			return
+		}
+	}
+}
+
 // TestHazardSounds replays the traces with a .sound fixture in each sound mode their .sound fixture
 // lists and compares every request, in order, with the game's own there (mode, update, pitch << 8 |
 // sample). The fixture numbers a request by the update whose processing made it, the update a Step
@@ -401,12 +436,7 @@ func TestHazardSounds(t *testing.T) {
 		{"play1-fuse-fall-float", 1}, {"play17-fire-midfall", 17}, {"play17-fire-bombers", 17},
 		{"play23-water-midfall", 23}, {"play17-crater-top", 17}, {"play16-crater-bottom", 16},
 	} {
-		want := map[string][][3]int{}
-		for _, r := range readCSV(t, filepath.Join(dir, c.name+".sound")) {
-			u, _ := strconv.Atoi(r[1])
-			w, _ := strconv.ParseUint(r[2], 16, 16)
-			want[r[0]] = append(want[r[0]], [3]int{u, int(w & 255), int(w >> 8)})
-		}
+		want := readSounds(t, filepath.Join(dir, c.name+".sound"))
 		for _, mode := range []string{"music", "effects"} {
 			if want[mode] == nil {
 				continue
@@ -423,9 +453,7 @@ func TestHazardSounds(t *testing.T) {
 				g := replay(t, c.name+".csv", c.play, collect)
 				g.Step()
 				collect(g)
-				if !slices.Equal(got, want[mode]) {
-					t.Errorf("sounds differ:\n got %v\nwant %v", got, want[mode])
-				}
+				compareSounds(t, c.name, got, want[mode])
 				t.Logf("%d sounds", len(got))
 			})
 		}
