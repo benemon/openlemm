@@ -1,0 +1,36 @@
+openlemm_VERSION_darwin_amd64.tar.gz
+  openlemm_VERSION_darwin_amd64/LICENSE
+  openlemm_VERSION_darwin_amd64/LICENSE.libopenmpt
+  openlemm_VERSION_darwin_amd64/README.md
+  openlemm_VERSION_darwin_amd64/libopenmpt.dylib
+  openlemm_VERSION_darwin_amd64/openlemm
+openlemm_VERSION_darwin_arm64.tar.gz
+  openlemm_VERSION_darwin_arm64/LICENSE
+  openlemm_VERSION_darwin_arm64/LICENSE.libopenmpt
+  openlemm_VERSION_darwin_arm64/README.md
+  openlemm_VERSION_darwin_arm64/libopenmpt.dylib
+  openlemm_VERSION_darwin_arm64/openlemm
+openlemm_VERSION_linux_amd64.tar.gz
+  openlemm_VERSION_linux_amd64/LICENSE
+  openlemm_VERSION_linux_amd64/LICENSE.libopenmpt
+  openlemm_VERSION_linux_amd64/README.md
+  openlemm_VERSION_linux_amd64/libopenmpt.so.0
+  openlemm_VERSION_linux_amd64/openlemm
+openlemm_VERSION_linux_arm64.tar.gz
+  openlemm_VERSION_linux_arm64/LICENSE
+  openlemm_VERSION_linux_arm64/LICENSE.libopenmpt
+  openlemm_VERSION_linux_arm64/README.md
+  openlemm_VERSION_linux_arm64/libopenmpt.so.0
+  openlemm_VERSION_linux_arm64/openlemm
+openlemm_VERSION_windows_amd64.zip
+  openlemm_VERSION_windows_amd64/LICENSE
+  openlemm_VERSION_windows_amd64/LICENSE.libopenmpt
+  openlemm_VERSION_windows_amd64/README.md
+  openlemm_VERSION_windows_amd64/libopenmpt.dll
+  openlemm_VERSION_windows_amd64/openlemm.exe
+openlemm_VERSION_windows_arm64.zip
+  openlemm_VERSION_windows_arm64/LICENSE
+  openlemm_VERSION_windows_arm64/LICENSE.libopenmpt
+  openlemm_VERSION_windows_arm64/README.md
+  openlemm_VERSION_windows_arm64/libopenmpt.dll
+  openlemm_VERSION_windows_arm64/openlemm.exe

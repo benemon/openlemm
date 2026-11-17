@@ -1,0 +1,48 @@
+name: libopenmpt
+
+# Builds the libopenmpt each release archive carries, on each target's own runner, into the artifact
+# libopenmpt_<os>_<arch>. ci.yml and release.yml call it.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: libopenmpt (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: darwin_amd64, runner: macos-15-intel }
+          - { target: darwin_arm64, runner: macos-latest }
+          - { target: linux_amd64, runner: ubuntu-latest }
+          - { target: linux_arm64, runner: ubuntu-24.04-arm }
+          - { target: windows_amd64, runner: windows-latest, msystem: UCRT64, compiler: mingw-w64-ucrt-x86_64-gcc }
+          - { target: windows_arm64, runner: windows-11-arm, msystem: CLANGARM64, compiler: mingw-w64-clang-aarch64-clang }
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build libopenmpt
+        if: runner.os != 'Windows'
+        run: .github/libopenmpt.sh "$RUNNER_TEMP/libopenmpt"
+      # The runner image's MSYS2; the login shell stays in the checkout with CHERE_INVOKING.
+      - name: Build libopenmpt in MSYS2
+        if: runner.os == 'Windows'
+        shell: C:\msys64\usr\bin\bash.exe -leo pipefail {0}
+        env:
+          MSYSTEM: ${{ matrix.msystem }}
+          CHERE_INVOKING: 1
+          COMPILER: ${{ matrix.compiler }}
+        run: |
+          pacman -S --noconfirm --needed make "$COMPILER"
+          .github/libopenmpt.sh "$(cygpath -u "$RUNNER_TEMP")/libopenmpt"
+      - name: Upload the library
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: libopenmpt_${{ matrix.target }}
+          path: ${{ runner.temp }}/libopenmpt
+          if-no-files-found: error
+          retention-days: 5

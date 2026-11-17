@@ -1,0 +1,26 @@
+name: dependency review
+
+# Gates what a pull request adds: a new dependency under a licence outside
+# the allowlist in the Makefile, or a known-vulnerable version, fails the
+# check. Dependency review on a private repository needs GitHub Advanced
+# Security, so the job skips while the repository is private.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Review new dependencies
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5
+        with:
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0
+          fail-on-severity: low
+          comment-summary-in-pr: on-failure

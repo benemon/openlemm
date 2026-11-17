@@ -1,0 +1,110 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# The release binaries are built without cgo, and purego loads libraries differently with it, so the tests run without
+# it too.
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - name: Run every gate
+        run: make check
+
+  libopenmpt:
+    uses: ./.github/workflows/libopenmpt.yml
+
+  # Without the disc, the tests that need it skip. TestTrackerPlays needs only libopenmpt, and must pass here with the
+  # library loaded from beside the test binary, as a release archive holds it.
+  test:
+    needs: libopenmpt
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux_amd64 }
+          - { os: macos-latest, target: darwin_arm64 }
+          - { os: windows-latest, target: windows_amd64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - name: Run the tests
+        run: go test ./...
+      - name: Download libopenmpt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: libopenmpt_${{ matrix.target }}
+          path: ${{ runner.temp }}/bundle
+      - name: Play a module through the bundled libopenmpt
+        run: |
+          go test -c -o "$RUNNER_TEMP/bundle/openlemm.test.exe" ./cmd/openlemm
+          cd cmd/openlemm
+          "$RUNNER_TEMP/bundle/openlemm.test.exe" -test.run '^TestTrackerPlays$' -test.v | tee "$RUNNER_TEMP/play.txt"
+          grep -q -- '--- PASS: TestTrackerPlays' "$RUNNER_TEMP/play.txt"
+
+  # The release build as a snapshot, unsigned and unpublished: it fails when the archives or the files they hold differ
+  # from .github/release-contents.txt.
+  release-build:
+    needs: libopenmpt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # goreleaser versions the snapshot from the newest v* tag.
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - name: Download libopenmpt for every target
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: libopenmpt_*
+          path: libopenmpt
+      - name: Install goreleaser, syft and cosign
+        run: |
+          .github/release-tools.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Check the goreleaser configuration
+        run: goreleaser check
+      - name: Build a snapshot release
+        run: goreleaser release --snapshot --clean --skip=sign
+      - name: Compare the archives with the expected contents
+        run: |
+          .github/release-contents.sh dist | tee "$RUNNER_TEMP/release-contents.txt"
+          diff -u .github/release-contents.txt "$RUNNER_TEMP/release-contents.txt"

@@ -1,0 +1,9 @@
+# Disc images are the player's own copy of the game; never track one.
+*.adf
+*.jfd
+
+# Build outputs
+/openlemm
+/cmd/openlemm/openlemm
+/dist/
+/libopenmpt/

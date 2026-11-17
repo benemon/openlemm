@@ -1,0 +1,59 @@
+name: Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '23 3 * * 1'
+  push:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  # Scheduled runs carry no event payload, so the visibility is read from the API rather than from
+  # github.event.repository.
+  visibility:
+    runs-on: ubuntu-latest
+    outputs:
+      private: ${{ steps.repo.outputs.private }}
+    steps:
+      - name: Read repository visibility
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" >> "$GITHUB_OUTPUT"
+
+  # Publishing results and uploading them to code scanning need a public repository (or GitHub Advanced Security), so
+  # the job skips while the repository is private.
+  analysis:
+    name: Scorecard analysis
+    needs: visibility
+    if: ${{ needs.visibility.outputs.private == 'false' }}
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          sarif_file: results.sarif
