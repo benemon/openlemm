@@ -111,7 +111,7 @@ func TestBoot(t *testing.T) {
 			}
 		})
 		t.Run(splashFiles[k]+"/hold", func(t *testing.T) {
-			t.Skip("the original holds 242 frames from the hold's start to its end, the engine 240")
+			t.Skip("the fixture counts the loader's frames, which count two display frames twice in each hold; the hold itself is 240 display frames")
 			f := newFlow(a, nil)
 			f.splash = k - 1
 			f.enter(splashing)
