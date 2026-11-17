@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -499,11 +500,31 @@ func loadAssets(d *disc.Disc) (*assets, error) {
 	return &assets{disc: d, menu: m, art: a, tables: tab}, nil
 }
 
+// versionText is the -version output: the module version and revision Go stamps from the checkout.
+func versionText(info *debug.BuildInfo) string {
+	version, revision := "(devel)", ""
+	if info != nil {
+		version = info.Main.Version
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" {
+				revision = s.Value
+			}
+		}
+	}
+	return fmt.Sprintf("version=%s\nrevision=%s\n", version, revision)
+}
+
 func main() {
 	adf := flag.String("disc", "", "path to the player's disc image (.adf or .jfd)")
 	rec := flag.Int("record", -1, "developer shortcut: play level record 0-99 at once, skipping the menus")
 	pan := flag.Bool("pan", true, "pan sound effects by the lemming's place in the view (the original centres them)")
+	version := flag.Bool("version", false, "print the version and revision, then exit")
 	flag.Parse()
+	if *version {
+		info, _ := debug.ReadBuildInfo()
+		fmt.Print(versionText(info))
+		return
+	}
 
 	scale := 1
 	if mon := ebiten.Monitor(); mon != nil {
