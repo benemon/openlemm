@@ -5,6 +5,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -395,5 +396,20 @@ func TestUnknownDisc(t *testing.T) {
 	}
 	if _, err := openDisc(p); err == nil || !strings.Contains(err.Error(), "unknown version") {
 		t.Errorf("openDisc of an altered disc: err = %v, want unknown version", err)
+	}
+}
+
+// TestVersionText's oracle is the build information Go stamps into the binary: the Homebrew
+// formula's test matches the version line against the release's version.
+func TestVersionText(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main:     debug.Module{Path: "github.com/benemon/openlemm", Version: "v1.2.3"},
+		Settings: []debug.BuildSetting{{Key: "vcs", Value: "git"}, {Key: "vcs.revision", Value: "abc123"}},
+	}
+	if got, want := versionText(info), "version=v1.2.3\nrevision=abc123\n"; got != want {
+		t.Errorf("versionText = %q, want %q", got, want)
+	}
+	if got, want := versionText(nil), "version=(devel)\nrevision=\n"; got != want {
+		t.Errorf("versionText(nil) = %q, want %q", got, want)
 	}
 }
