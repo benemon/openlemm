@@ -3,9 +3,11 @@ package sim
 import (
 	"encoding/csv"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/benemon/openlemm/internal/disc"
@@ -26,11 +28,31 @@ func readCSV(t *testing.T, name string) [][]string {
 	return rows[1:]
 }
 
+// diverge is the line naming a fixture's first difference from the sim; lemming is -1 when the
+// field is not a lemming's.
+func diverge(name string, update, lemming int, field string, trace, sim any) string {
+	return fmt.Sprintf("DIVERGE %s update=%d lemming=%d field=%s trace=%v sim=%v", name, update, lemming, field, trace, sim)
+}
+
+// readInput returns the rows of an input fixture, failing with an UNSUPPORTED line when its header
+// is not the one the replay reads.
+func readInput(t *testing.T, name, file, header string) [][]string {
+	t.Helper()
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, _, _ := strings.Cut(string(b), "\n"); strings.TrimSpace(h) != header {
+		t.Fatalf("UNSUPPORTED %s %s columns %s", name, filepath.Base(file), strings.TrimSpace(h))
+	}
+	return readCSV(t, file)
+}
+
 // replay steps the level at play index n through a trace observed in the running game (columns
 // update, lemming, x, y, dir, frame, state, removed; map coordinates), applying the skill
 // assignments in name+".inputs" (update, lemming, skill) and the real input in name+".input"
-// if they exist, and fails at the first difference. It calls each after every Step, and returns
-// the game at the trace's last update.
+// if they exist, and fails at the first difference with a diverge line. It calls each after every
+// Step, and returns the game at the trace's last update.
 func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 	adf, dir := os.Getenv("OPENLEMM_DISC"), os.Getenv("OPENLEMM_FIXTURES")
 	if adf == "" || dir == "" {
@@ -57,16 +79,17 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 		t.Fatal(err)
 	}
 	rows := readCSV(t, filepath.Join(dir, name))
+	stem := strings.TrimSuffix(filepath.Base(name), ".csv")
 	type input struct {
 		n int
 		s Skill
 	}
 	inputs := map[int][]input{}
 	if _, err := os.Stat(filepath.Join(dir, name+".inputs")); err == nil {
-		for _, r := range readCSV(t, filepath.Join(dir, name+".inputs")) {
+		for _, r := range readInput(t, stem, filepath.Join(dir, name+".inputs"), "update,lemming,skill") {
 			s, ok := map[string]Skill{"climber": Climber, "floater": Floater, "bomber": Bomber, "builder": Builder, "basher": Basher, "miner": Miner, "digger": Digger}[r[2]]
 			if !ok {
-				t.Fatalf("input %v: skill not implemented", r)
+				t.Fatalf("UNSUPPORTED %s skill %s", stem, r[2])
 			}
 			u, err1 := strconv.Atoi(r[0])
 			n, err2 := strconv.Atoi(r[1])
@@ -83,7 +106,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 	}
 	real := map[int]pointer{}
 	if _, err := os.Stat(filepath.Join(dir, name+".input")); err == nil {
-		for _, r := range readCSV(t, filepath.Join(dir, name+".input")) {
+		for _, r := range readInput(t, stem, filepath.Join(dir, name+".input"), "update,x,y,buttons,scroll,chosen") {
 			var v [6]int
 			for k, s := range r {
 				if v[k], err = strconv.Atoi(s); err != nil {
@@ -91,7 +114,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 				}
 			}
 			if v[3]&^1 != 0 {
-				t.Fatalf("input %v: buttons other than left", r)
+				t.Fatalf("UNSUPPORTED %s buttons %d", stem, v[3])
 			}
 			real[v[0]] = pointer{realInput(v[1], v[2], v[4], v[3]&1 != 0), v[5]}
 		}
@@ -109,7 +132,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 		u, n := v[0], v[1]
 		if u != g.Update {
 			if seen != len(g.Lemmings) {
-				t.Fatalf("update %d: %d lemmings, trace has %d", g.Update, len(g.Lemmings), seen)
+				t.Fatal(diverge(stem, g.Update, -1, "lemmings", seen, len(g.Lemmings)))
 			}
 			for g.Update < u {
 				p, ok := real[g.Update+1]
@@ -121,7 +144,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 					f(g)
 				}
 				if ok && g.chosen+1 != p.chosen {
-					t.Fatalf("update %d: chosen %d, game %d", g.Update, g.chosen, p.chosen-1)
+					t.Fatal(diverge(stem, g.Update, -1, "chosen", p.chosen-1, g.chosen))
 				}
 				for _, in := range inputs[g.Update] {
 					// The oracle forces assignments, lowering the count even from 0 to -1, past
@@ -130,7 +153,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 					g.Skills[in.s] = max(g.Skills[in.s], 1)
 					if l := &g.Lemmings[in.n]; !g.Assign(in.n, in.s) {
 						if in.s != Digger || l.own&15 != steel {
-							t.Fatalf("update %d: skill %d refused for lemming %d", g.Update, in.s, in.n)
+							t.Fatal(diverge(stem, g.Update, in.n, "assign", in.s, "refused"))
 						}
 						l.State, l.Frame = Digging, digFrom
 						g.Skills[in.s]--
@@ -141,7 +164,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 		}
 		seen++
 		if n >= len(g.Lemmings) {
-			t.Fatalf("update %d: lemming %d not released (%d out)", u, n, len(g.Lemmings))
+			t.Fatal(diverge(stem, u, n, "lemmings", n+1, len(g.Lemmings)))
 		}
 		m := g.Lemmings[n]
 		got := [6]int{m.X, m.Y, m.Dir, m.Frame, m.State, 0}
@@ -150,12 +173,13 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 		}
 		for k, name := range [6]string{"x", "y", "dir", "frame", "state", "removed"} {
 			if got[k] != v[2+k] {
-				t.Fatalf("update %d lemming %d: %s = %d, trace %d (lemming %+v)", u, n, name, got[k], v[2+k], m)
+				t.Logf("lemming %+v", m)
+				t.Fatal(diverge(stem, u, n, name, v[2+k], got[k]))
 			}
 		}
 	}
 	if seen != len(g.Lemmings) {
-		t.Fatalf("update %d: %d lemmings, trace has %d", g.Update, len(g.Lemmings), seen)
+		t.Fatal(diverge(stem, g.Update, -1, "lemmings", seen, len(g.Lemmings)))
 	}
 	t.Logf("matched %d rows to update %d", len(rows), g.Update)
 	return g
@@ -270,7 +294,7 @@ func compareMap(t *testing.T, g *Game, name string) {
 		for k, v := range [2]uint8{b & 15, b >> 4} {
 			if p := 2*i + k; g.terrain[p] != v {
 				if diff == 0 {
-					t.Errorf("map (%d, %d): colour %d, game %d", p%mapW, p/mapW, g.terrain[p], v)
+					t.Error(diverge(strings.TrimSuffix(filepath.Base(name), ".map"), g.Update, -1, fmt.Sprintf("map(%d,%d)", p%mapW, p/mapW), v, g.terrain[p]))
 				}
 				diff++
 			}
