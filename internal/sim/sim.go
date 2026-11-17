@@ -723,6 +723,7 @@ func (g *Game) move(l *Lemming) bool {
 			g.crater = l
 			g.sound(l.X, 0x1D, 0x10)
 			g.unblock(l)
+			l.State &^= Blocking
 		}
 		l.Removed = l.Frame == 52
 	case l.State&Falling != 0:
