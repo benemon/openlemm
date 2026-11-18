@@ -114,10 +114,10 @@ func toMap(sx, sy, scroll int) (px, py int) {
 	return scroll + sx, sy - viewTop + 4
 }
 
-// scrollStep moves scroll by d, refusing a fast step that would pass a limit.
+// scrollStep moves scroll by d, refusing a fast step that would land on or past 1280 or below 0.
 func scrollStep(scroll, d int) int {
 	n := scroll + d
-	if (n < 0 || n > maxScroll) && (d == 16 || d == -16) {
+	if d == 16 && n >= maxScroll || d == -16 && n < 0 {
 		return scroll
 	}
 	return min(max(n, 0), maxScroll)

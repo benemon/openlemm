@@ -29,8 +29,9 @@ func TestToMap(t *testing.T) {
 	}
 }
 
-// TestScrollStep's oracle is the scrolling rule: limits 0 and 1280, and a 16-pixel step that would
-// pass a limit is not taken at all.
+// TestScrollStep's oracle is the scrolling rule: limits 0 and 1280; a 16-pixel step to the right
+// is taken only when it lands below 1280, one to the left when it lands on 0 or above; a 4-pixel
+// step is skipped only at the limit it moves towards.
 func TestScrollStep(t *testing.T) {
 	for _, c := range []struct{ scroll, d, want int }{
 		{640, 4, 644},
@@ -38,10 +39,14 @@ func TestScrollStep(t *testing.T) {
 		{640, 16, 656},
 		{16, -16, 0},
 		{8, -16, 8},
-		{1264, 16, 1280},
+		{1248, 16, 1264},
+		{1264, 16, 1264},
+		{1260, 16, 1276},
 		{1272, 16, 1272},
 		{1276, 4, 1280},
+		{1280, 4, 1280},
 		{4, -4, 0},
+		{0, -4, 0},
 	} {
 		if got := scrollStep(c.scroll, c.d); got != c.want {
 			t.Errorf("scrollStep(%d, %d) = %d, want %d", c.scroll, c.d, got, c.want)
