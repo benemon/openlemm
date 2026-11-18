@@ -153,16 +153,18 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 			}
 			for _, in := range inputs[g.Update] {
 				// The oracle forces assignments, lowering the count even from 0 to -1, past
-				// the game's refusals. Only play23-water-midfall's digger, on steel, is one
+				// the game's refusals; the game refuses only a count of exactly 0, so a count
+				// below 0 stays usable. Only play23-water-midfall's digger, on steel, is one
 				// the game would refuse: it is written as the oracle wrote it.
-				g.Skills[in.s] = max(g.Skills[in.s], 1)
+				c := g.Skills[in.s]
+				g.Skills[in.s] = max(c, 1)
 				if l := &g.Lemmings[in.n]; !g.Assign(in.n, in.s) {
 					if in.s != Digger || l.own&15 != steel {
 						t.Fatal(diverge(stem, g.Update, in.n, "assign", in.s, "refused"))
 					}
 					l.State, l.Frame = Digging, digFrom
-					g.Skills[in.s]--
 				}
+				g.Skills[in.s] = c - 1
 			}
 		}
 	}
