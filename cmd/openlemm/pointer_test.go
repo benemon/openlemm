@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/benemon/openlemm/internal/level"
 )
 
-// readInts reads a fixture CSV after its header line as integers.
+// readInts reads a fixture CSV after its header line as integers, an empty field as 0.
 func readInts(t *testing.T, name string) [][]int {
 	t.Helper()
 	b, err := os.Open(name)
@@ -26,6 +27,9 @@ func readInts(t *testing.T, name string) [][]int {
 	for _, r := range rows[1:] {
 		v := make([]int, len(r))
 		for k, s := range r {
+			if s == "" {
+				continue
+			}
 			if v[k], err = strconv.Atoi(s); err != nil {
 				t.Fatalf("%s %v: %v", name, r, err)
 			}
@@ -113,5 +117,59 @@ func TestPointerTrace(t *testing.T) {
 				t.Fatalf("update %d lemming %d: %v, trace %v", u, w[1], got, w[2:8])
 			}
 		}
+	}
+}
+
+// TestFuzzScroll plays each fuzz recording whose .csv.input has pass columns through the play
+// update path, one update per row with the row's pointer, buttons and keys (Escape as a press), and
+// compares per row the view, the volume setting, the music volume and the speaker toggle.
+func TestFuzzScroll(t *testing.T) {
+	dir := os.Getenv("OPENLEMM_FIXTURES")
+	files, _ := filepath.Glob(filepath.Join(dir, "fuzz", "play*-*.csv.input"))
+	if dir == "" || len(files) == 0 {
+		t.Skip("no fuzz recordings")
+	}
+	f := testFlow(t)
+	for _, file := range files {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(string(b), "update,x,y,buttons,scroll,chosen,cx,cy,pass,paused,keys,setting,music,speaker\n") {
+			continue
+		}
+		name := strings.TrimSuffix(filepath.Base(file), ".csv.input")
+		t.Run(name, func(t *testing.T) {
+			n, _, _ := strings.Cut(strings.TrimPrefix(name, "play"), "-")
+			play, err := strconv.Atoi(n)
+			if err != nil {
+				t.Fatalf("%s: no play index", name)
+			}
+			l, err := level.LoadPlay(f.disc, play)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := newPlay(l, f.tables, play)
+			escape := false
+			for _, r := range readInts(t, file) {
+				u, x, y, buttons, scroll, pass, keys := r[0], r[1], r[2], r[3], r[4], r[8], r[10]
+				in := input{left: buttons&1 != 0, right: buttons&2 != 0, f1: keys&1 != 0, f2: keys&2 != 0, f5: keys&8 != 0,
+					escape: keys&4 != 0 && !escape}
+				escape = keys&4 != 0
+				p.update(in, x, y+viewTop, nil, false)
+				in.escape = false
+				p.update(in, x, y+viewTop, nil, false)
+				p.update(in, x, y+viewTop, nil, false)
+				speaker := 0
+				if p.sim.Quiet {
+					speaker = 1
+				}
+				got := [4]int{p.scroll, p.sim.Volume, p.sim.MusicVolume(), speaker}
+				if want := [4]int{scroll, r[11], r[12], r[13]}; p.sim.Update != pass || got != want {
+					t.Fatalf("DIVERGE %s update=%d pass=%d (sim pass %d): view, setting, music, speaker %v, trace %v", name, u, pass, p.sim.Update, got, want)
+				}
+			}
+			t.Logf("MATCH %s", name)
+		})
 	}
 }

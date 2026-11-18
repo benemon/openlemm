@@ -54,6 +54,8 @@ func readInput(t *testing.T, name, file string, headers ...string) [][]string {
 // assignments in name+".inputs" (update, lemming, skill) and the real input in name+".input"
 // if they exist, and fails at the first difference with a diverge line. It calls each after every
 // Step, and returns the game at the last update of the trace or its input, whichever is later.
+// An input with pass columns has one row per pass of the game's loop, paused or not; the replay
+// steps once per pass, and a trace row or assignment of update u belongs to u's unpaused pass.
 func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 	adf, dir := os.Getenv("OPENLEMM_DISC"), os.Getenv("OPENLEMM_FIXTURES")
 	if adf == "" || dir == "" {
@@ -81,11 +83,64 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 	}
 	rows := readCSV(t, filepath.Join(dir, name))
 	stem := strings.TrimSuffix(filepath.Base(name), ".csv")
+
+	type pointer struct {
+		in     Input
+		scroll int
+		chosen int  // record index + 1, 0 for none
+		c      bool // the pointer the original's choice read is known
+		cx, cy int
+		pass   bool // the row has the pass columns
+
+		update, paused, setting, music, speaker int
+	}
+	real := map[int]pointer{} // by pass; without pass columns, a pass is an update
+	unpaused := map[int]int{} // update to its unpaused pass, for inputs with pass columns
+	if _, err := os.Stat(filepath.Join(dir, name+".input")); err == nil {
+		for _, r := range readInput(t, stem, filepath.Join(dir, name+".input"), "update,x,y,buttons,scroll,chosen", "update,x,y,buttons,scroll,chosen,cx,cy",
+			"update,x,y,buttons,scroll,chosen,cx,cy,pass,paused,keys,setting,music,speaker") {
+			var v [14]int
+			for k, s := range r {
+				if k >= 6 && s == "" {
+					continue
+				}
+				if v[k], err = strconv.Atoi(s); err != nil {
+					t.Fatalf("input %v: %v", r, err)
+				}
+			}
+			pass := len(r) == 14
+			if v[3]&^1 != 0 && !pass {
+				t.Fatalf("UNSUPPORTED %s buttons %d", stem, v[3])
+			}
+			c := len(r) >= 8 && r[6] != "" && r[7] != ""
+			p := pointer{realInput(v[1], v[2], v[4], v[3]&1 != 0, v[3]&2 != 0), v[4], v[5], c, v[6], v[7], pass, v[0], v[9], v[11], v[12], v[13]}
+			k := v[0]
+			if pass {
+				k = v[8]
+				p.in.VolDown, p.in.VolUp, p.in.Escape, p.in.Speaker = v[10]&1 != 0, v[10]&2 != 0, v[10]&4 != 0, v[10]&8 != 0
+				if v[9] == 0 {
+					unpaused[v[0]] = k
+				}
+			}
+			real[k] = p
+		}
+	}
+	passOf := func(u int) int {
+		if len(unpaused) == 0 {
+			return u
+		}
+		p, ok := unpaused[u]
+		if !ok {
+			t.Fatalf("%s: update %d has no unpaused pass", stem, u)
+		}
+		return p
+	}
+
 	type input struct {
 		n int
 		s Skill
 	}
-	inputs := map[int][]input{}
+	inputs := map[int][]input{} // by pass
 	if _, err := os.Stat(filepath.Join(dir, name+".inputs")); err == nil {
 		for _, r := range readInput(t, stem, filepath.Join(dir, name+".inputs"), "update,lemming,skill") {
 			s, ok := map[string]Skill{"climber": Climber, "floater": Floater, "bomber": Bomber, "builder": Builder, "basher": Basher, "miner": Miner, "digger": Digger}[r[2]]
@@ -97,34 +152,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 			if err1 != nil || err2 != nil {
 				t.Fatalf("input %v: bad number", r)
 			}
-			inputs[u] = append(inputs[u], input{n, s})
-		}
-	}
-
-	type pointer struct {
-		in     Input
-		scroll int
-		chosen int  // record index + 1, 0 for none
-		c      bool // the pointer the original's choice read is known
-		cx, cy int
-	}
-	real := map[int]pointer{}
-	if _, err := os.Stat(filepath.Join(dir, name+".input")); err == nil {
-		for _, r := range readInput(t, stem, filepath.Join(dir, name+".input"), "update,x,y,buttons,scroll,chosen", "update,x,y,buttons,scroll,chosen,cx,cy") {
-			var v [8]int
-			for k, s := range r {
-				if k >= 6 && s == "" {
-					continue
-				}
-				if v[k], err = strconv.Atoi(s); err != nil {
-					t.Fatalf("input %v: %v", r, err)
-				}
-			}
-			if v[3]&^1 != 0 {
-				t.Fatalf("UNSUPPORTED %s buttons %d", stem, v[3])
-			}
-			c := len(r) == 8 && r[6] != "" && r[7] != ""
-			real[v[0]] = pointer{realInput(v[1], v[2], v[4], v[3]&1 != 0), v[4], v[5], c, v[6], v[7]}
+			inputs[passOf(u)] = append(inputs[passOf(u)], input{n, s})
 		}
 	}
 
@@ -148,8 +176,29 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 			for _, f := range each {
 				f(g)
 			}
+			u := g.Update
+			if ok && p.pass {
+				u = p.update
+				speaker := 0
+				if g.Quiet {
+					speaker = 1
+				}
+				paused := 0
+				if g.paused {
+					paused = 1
+				}
+				for _, f := range []struct {
+					name       string
+					trace, sim int
+				}{{"update", p.update, g.start}, {"paused", p.paused, paused}, {"setting", p.setting, g.Volume},
+					{"music", p.music, g.MusicVolume()}, {"speaker", p.speaker, speaker}} {
+					if f.trace != f.sim {
+						t.Fatal(diverge(stem, u, -1, f.name, f.trace, f.sim))
+					}
+				}
+			}
 			if ok && chosen+1 != p.chosen {
-				t.Fatal(diverge(stem, g.Update, -1, "chosen", p.chosen-1, chosen))
+				t.Fatal(diverge(stem, u, -1, "chosen", p.chosen-1, chosen))
 			}
 			for _, in := range inputs[g.Update] {
 				// The oracle forces assignments, lowering the count even from 0 to -1, past
@@ -169,6 +218,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 		}
 	}
 	seen := 0 // lemmings in the trace at the current update
+	at := 0   // the current update
 	for i, r := range rows {
 		var v [8]int
 		for k, s := range r {
@@ -177,12 +227,12 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 			}
 		}
 		u, n := v[0], v[1]
-		if u != g.Update {
+		if p := passOf(u); p != g.Update {
 			if seen != len(g.Lemmings) {
-				t.Fatal(diverge(stem, g.Update, -1, "lemmings", seen, len(g.Lemmings)))
+				t.Fatal(diverge(stem, at, -1, "lemmings", seen, len(g.Lemmings)))
 			}
-			stepTo(u)
-			seen = 0
+			stepTo(p)
+			seen, at = 0, u
 		}
 		seen++
 		if n >= len(g.Lemmings) {
@@ -201,7 +251,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 		}
 	}
 	if seen != len(g.Lemmings) {
-		t.Fatal(diverge(stem, g.Update, -1, "lemmings", seen, len(g.Lemmings)))
+		t.Fatal(diverge(stem, at, -1, "lemmings", seen, len(g.Lemmings)))
 	}
 	last := 0
 	for u := range real {
@@ -219,15 +269,15 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 }
 
 // realInput is the sim's Input for the game's stored pointer (x, y), the view's left edge scroll
-// and the left button. The stored pointer is the centre's view column and level row (screen row −
+// and the buttons. The stored pointer is the centre's view column and level row (screen row −
 // 16), so map px = x + scroll, py = y + 4; level rows below 176 are the playfield, and screen rows
 // 200–223 are the panel buttons, picked by column.
-func realInput(x, y, scroll int, left bool) Input {
+func realInput(x, y, scroll int, left, right bool) Input {
 	b := -1
 	if sy := y + 16; sy >= 200 && sy <= 223 && x < 16*(Nuke+1) {
 		b = x / 16
 	}
-	return Input{X: x + scroll, Y: y + 4, Playfield: y < 176, Button: b, Left: left}
+	return Input{X: x + scroll, Y: y + 4, Playfield: y < 176, Button: b, Left: left, Right: right}
 }
 
 func TestPlay0NoInput(t *testing.T) {
