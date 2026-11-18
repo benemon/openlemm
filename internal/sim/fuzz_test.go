@@ -39,11 +39,11 @@ func TestFuzzTraces(t *testing.T) {
 			var got [][3]int
 			collect := func(g *Game) {
 				for _, s := range g.Sounds {
-					got = append(got, [3]int{g.Update - 1, s.Sample, s.Pitch})
+					got = append(got, [3]int{g.Start(), s.Sample, s.Pitch})
 				}
 			}
 			g := replay(t, filepath.Join("fuzz", name+".csv"), play, collect)
-			updates := g.Update
+			updates := g.start
 			m := "absent"
 			if _, err := os.Stat(filepath.Join(dir, name+".map")); err == nil {
 				if compareMap(t, g, filepath.Join("fuzz", name+".map")); t.Failed() {
