@@ -53,7 +53,7 @@ func readInput(t *testing.T, name, file string, headers ...string) [][]string {
 // update, lemming, x, y, dir, frame, state, removed; map coordinates), applying the skill
 // assignments in name+".inputs" (update, lemming, skill) and the real input in name+".input"
 // if they exist, and fails at the first difference with a diverge line. It calls each after every
-// Step, and returns the game at the trace's last update.
+// Step, and returns the game at the last update of the trace or its input, whichever is later.
 func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 	adf, dir := os.Getenv("OPENLEMM_DISC"), os.Getenv("OPENLEMM_FIXTURES")
 	if adf == "" || dir == "" {
@@ -129,6 +129,43 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 	}
 
 	g := New(l, tab)
+	stepTo := func(u int) {
+		for g.Update < u {
+			p, ok := real[g.Update+1]
+			if ok {
+				g.Input = p.in
+			}
+			g.finish()
+			chosen := g.chosen
+			if prev, ok := real[g.Update]; ok && p.c {
+				// The engine chooses with its own pointer sample; the original's choice can
+				// read a later one, so its rule is checked with the pointer the original read.
+				in := g.read
+				in.X, in.Y = p.cx+prev.scroll, p.cy+4
+				chosen, _, _ = g.choice(in)
+			}
+			g.begin()
+			for _, f := range each {
+				f(g)
+			}
+			if ok && chosen+1 != p.chosen {
+				t.Fatal(diverge(stem, g.Update, -1, "chosen", p.chosen-1, chosen))
+			}
+			for _, in := range inputs[g.Update] {
+				// The oracle forces assignments, lowering the count even from 0 to -1, past
+				// the game's refusals. Only play23-water-midfall's digger, on steel, is one
+				// the game would refuse: it is written as the oracle wrote it.
+				g.Skills[in.s] = max(g.Skills[in.s], 1)
+				if l := &g.Lemmings[in.n]; !g.Assign(in.n, in.s) {
+					if in.s != Digger || l.own&15 != steel {
+						t.Fatal(diverge(stem, g.Update, in.n, "assign", in.s, "refused"))
+					}
+					l.State, l.Frame = Digging, digFrom
+					g.Skills[in.s]--
+				}
+			}
+		}
+	}
 	seen := 0 // lemmings in the trace at the current update
 	for i, r := range rows {
 		var v [8]int
@@ -142,41 +179,7 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 			if seen != len(g.Lemmings) {
 				t.Fatal(diverge(stem, g.Update, -1, "lemmings", seen, len(g.Lemmings)))
 			}
-			for g.Update < u {
-				p, ok := real[g.Update+1]
-				if ok {
-					g.Input = p.in
-				}
-				g.finish()
-				chosen := g.chosen
-				if prev, ok := real[g.Update]; ok && p.c {
-					// The engine chooses with its own pointer sample; the original's choice can
-					// read a later one, so its rule is checked with the pointer the original read.
-					in := g.read
-					in.X, in.Y = p.cx+prev.scroll, p.cy+4
-					chosen, _, _ = g.choice(in)
-				}
-				g.begin()
-				for _, f := range each {
-					f(g)
-				}
-				if ok && chosen+1 != p.chosen {
-					t.Fatal(diverge(stem, g.Update, -1, "chosen", p.chosen-1, chosen))
-				}
-				for _, in := range inputs[g.Update] {
-					// The oracle forces assignments, lowering the count even from 0 to -1, past
-					// the game's refusals. Only play23-water-midfall's digger, on steel, is one
-					// the game would refuse: it is written as the oracle wrote it.
-					g.Skills[in.s] = max(g.Skills[in.s], 1)
-					if l := &g.Lemmings[in.n]; !g.Assign(in.n, in.s) {
-						if in.s != Digger || l.own&15 != steel {
-							t.Fatal(diverge(stem, g.Update, in.n, "assign", in.s, "refused"))
-						}
-						l.State, l.Frame = Digging, digFrom
-						g.Skills[in.s]--
-					}
-				}
-			}
+			stepTo(u)
 			seen = 0
 		}
 		seen++
@@ -197,6 +200,17 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 	}
 	if seen != len(g.Lemmings) {
 		t.Fatal(diverge(stem, g.Update, -1, "lemmings", seen, len(g.Lemmings)))
+	}
+	last := 0
+	for u := range real {
+		last = max(last, u)
+	}
+	for u := range inputs {
+		last = max(last, u)
+	}
+	stepTo(last)
+	if len(rows) == 0 && len(g.Lemmings) != 0 {
+		t.Fatal(diverge(stem, g.Update, -1, "lemmings", 0, len(g.Lemmings)))
 	}
 	t.Logf("matched %d rows to update %d", len(rows), g.Update)
 	return g
