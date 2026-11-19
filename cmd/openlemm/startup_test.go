@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"os"
@@ -34,8 +35,9 @@ func readFadeoutFixture(t *testing.T, name string, v any) {
 type bootFixture struct {
 	Frames []bootFrame
 	Events []struct {
-		Event, Splash string
-		Counter       int `json:"frame_counter"`
+		Event, Splash, How string
+		Counter            int `json:"frame_counter"`
+		Left               int `json:"r8"` // hold frames left when a hold ends
 	}
 }
 
@@ -152,6 +154,73 @@ func TestBoot(t *testing.T) {
 			}
 			if m := until(t, f, input{}, titleMenu, 1000); m != waitN {
 				t.Errorf("black wait %d frames, fixture %d", m, waitN)
+			}
+		})
+	}
+}
+
+// TestBootSkip replays boot-skip1-3.json, each with the left button pressed during one splash's
+// hold: the hold ends on the frame the button is first held, the splash fades out as recorded, and
+// the black wait follows it, the later splashes skipped. The black wait's length is not compared:
+// the loader counted 101 and 102 frames for it in these runs, counting display frames twice.
+func TestBootSkip(t *testing.T) {
+	a, err := loadAssets(testDisc(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range 3 {
+		name := splashFiles[k]
+		t.Run(name, func(t *testing.T) {
+			var fx bootFixture
+			readFadeoutFixture(t, fmt.Sprintf("boot-skip%d", k+1), &fx)
+			starts, end, held, waitStart := 0, -1, 0, -1
+			for _, e := range fx.Events {
+				switch e.Event {
+				case "wait-start":
+					starts++
+				case "wait-end":
+					if e.How == "button" {
+						end, held = e.Counter, 240-e.Left
+					}
+				case "black-wait-start":
+					waitStart = e.Counter
+				}
+			}
+			if starts != k+1 || end < 0 || waitStart < 0 {
+				t.Fatalf("%d holds, button end at %d, black wait from %d: want %d holds, the last ended by the button", starts, end, waitStart, k+1)
+			}
+			f := newFlow(a, nil)
+			f.splash = k - 1
+			f.enter(splashing)
+			run(t, f, input{}, held-1)
+			if f.leaving {
+				t.Fatalf("hold over after %d frames with no button", held-1)
+			}
+			run(t, f, input{left: true}, 1)
+			if !f.leaving {
+				t.Fatalf("hold frame %d: button held, hold not over", held)
+			}
+			f.frame, f.begin = end, end
+			n := end + 1
+			for ; fx.Frames[n-1].Fade.Out != 0; n++ {
+				run(t, f, input{}, 1)
+				if f.ph != splashing || f.splash != k {
+					t.Fatalf("frame %d: next screen open while the fixture is fading out", n)
+				}
+				v, err := f.view()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, want := paletteHex(v.scr.Upper), fx.Frames[n-1].Working; !slices.Equal(got, want) {
+					t.Errorf("frame %d: palette %v, fixture %v", n, got, want)
+				}
+			}
+			run(t, f, input{}, 1)
+			if f.ph != waiting {
+				t.Fatalf("frame %d (fade-out over): phase %d splash %d, want the black wait", n, f.ph, f.splash)
+			}
+			if n != waitStart {
+				t.Errorf("black wait from frame %d, fixture %d", n, waitStart)
 			}
 		})
 	}
