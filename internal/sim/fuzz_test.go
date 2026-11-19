@@ -9,8 +9,9 @@ import (
 )
 
 // TestFuzzTraces replays every play<N>-<id>.csv recording in the fixtures' fuzz directory at play
-// index N, with its input, final map and music-mode sound requests where they exist. A recording's
-// first difference ends its subtest with a DIVERGE line; a recording that matches logs a MATCH line.
+// index N, with its input, final map and sound requests (music or effects mode) where they exist.
+// A recording's first difference ends its subtest with a DIVERGE line; a recording that matches
+// logs a MATCH line.
 func TestFuzzTraces(t *testing.T) {
 	dir := filepath.Join(os.Getenv("OPENLEMM_FIXTURES"), "fuzz")
 	files, _ := filepath.Glob(filepath.Join(dir, "play*-*.csv"))
@@ -30,14 +31,16 @@ func TestFuzzTraces(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dir, name+".sound")); err == nil {
 				want = readSounds(t, filepath.Join(dir, name+".sound"))
 				for mode := range want {
-					if mode != "music" {
+					if (mode != "music" && mode != "effects") || len(want) > 1 {
 						t.Fatalf("UNSUPPORTED %s sound mode %s", name, mode)
 					}
+					sound = mode
 				}
-				sound = "ok"
 			}
 			var got [][3]int
 			collect := func(g *Game) {
+				// The first Step runs in music mode; it makes no mode-dependent request.
+				g.Effects = sound == "effects"
 				for _, s := range g.Sounds {
 					got = append(got, [3]int{g.Start(), s.Sample, s.Pitch})
 				}
@@ -51,10 +54,10 @@ func TestFuzzTraces(t *testing.T) {
 				}
 				m = "ok"
 			}
-			if sound == "ok" {
+			if sound != "absent" {
 				// The recording writes a request one update late, so none made in its final
 				// update is in it: the engine's requests there are not stepped or compared.
-				if compareSounds(t, name, got, want["music"]); t.Failed() {
+				if compareSounds(t, name, got, want[sound]); t.Failed() {
 					return
 				}
 			}
