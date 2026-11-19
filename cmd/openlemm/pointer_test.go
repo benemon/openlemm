@@ -122,7 +122,8 @@ func TestPointerTrace(t *testing.T) {
 
 // TestFuzzScroll plays each fuzz recording whose .csv.input has pass columns through the play
 // update path, one update per row with the row's pointer, buttons and keys (Escape as a press), and
-// compares per row the view, the volume setting, the music volume and the speaker toggle.
+// compares per row the view, the volume setting, the music volume and the speaker toggle, and, at
+// the updates its .panel file lists, the status line's type name as the original displayed it.
 func TestFuzzScroll(t *testing.T) {
 	dir := os.Getenv("OPENLEMM_FIXTURES")
 	files, _ := filepath.Glob(filepath.Join(dir, "fuzz", "play*-*.csv.input"))
@@ -150,6 +151,17 @@ func TestFuzzScroll(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := newPlay(l, f.tables, play)
+			names := map[int]string{}
+			if b, err := os.ReadFile(filepath.Join(dir, "fuzz", name+".panel")); err == nil {
+				for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n")[1:] {
+					u, typ, _ := strings.Cut(line, ",")
+					n, err := strconv.Atoi(u)
+					if err != nil {
+						t.Fatalf("%s.panel %q: %v", name, line, err)
+					}
+					names[n] = typ
+				}
+			}
 			escape := false
 			for _, r := range readInts(t, file) {
 				u, x, y, buttons, scroll, pass, keys := r[0], r[1], r[2], r[3], r[4], r[8], r[10]
@@ -168,6 +180,15 @@ func TestFuzzScroll(t *testing.T) {
 				if want := [4]int{scroll, r[11], r[12], r[13]}; p.sim.Update != pass || got != want {
 					t.Fatalf("DIVERGE %s update=%d pass=%d (sim pass %d): view, setting, music, speaker %v, trace %v", name, u, pass, p.sim.Update, got, want)
 				}
+				if typ, ok := names[u]; ok {
+					if got := p.panelState().Type; got != typ {
+						t.Fatalf("DIVERGE %s update=%d: type name %q, displayed %q", name, u, got, typ)
+					}
+					delete(names, u)
+				}
+			}
+			if len(names) > 0 {
+				t.Fatalf("%s: .panel updates %v not in the input", name, names)
 			}
 			t.Logf("MATCH %s", name)
 		})
