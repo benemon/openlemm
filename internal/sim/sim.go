@@ -1036,7 +1036,9 @@ func (g *Game) walk(l *Lemming) {
 	l.Frame = (l.Frame + 1) & 7
 	l.X += l.Dir
 	if l.X < 16 || l.X > 1607 {
+		// The turn ends the update: no ground is tested, and the out-of-range x is stored.
 		l.Dir = -l.Dir
+		return
 	}
 	if g.solid(l.X, l.Y) {
 		rise := 0
