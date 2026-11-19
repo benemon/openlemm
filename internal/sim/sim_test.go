@@ -167,10 +167,12 @@ func replay(t *testing.T, name string, n int, each ...func(*Game)) *Game {
 			chosen := g.chosen
 			if prev, ok := real[g.Update]; ok && p.c {
 				// The engine chooses with its own pointer sample; the original's choice can
-				// read a later one, so its rule is checked with the pointer the original read.
+				// read a later one, so its rule is checked, and a click assigns, with the pointer
+				// the original read.
 				in := g.read
 				in.X, in.Y = p.cx+prev.scroll, p.cy+4
-				chosen, _, _ = g.choice(in)
+				chosen, g.other, _ = g.choice(in)
+				g.chosen = chosen
 			}
 			g.begin()
 			for _, f := range each {
