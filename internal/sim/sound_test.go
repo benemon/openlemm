@@ -432,7 +432,7 @@ func TestHazardSounds(t *testing.T) {
 		name string
 		play int
 	}{
-		{"play16-traps", 16}, {"play8-bombers-water", 8}, {"play8-fire", 8}, {"play0-exit-midfall", 0},
+		{"play16-traps", 16}, {"play8-bombers-water", 8}, {"play8-fire", 8}, {"play0-exit-midfall", 0}, {"play0-exit-float", 0},
 		{"play1-fuse-fall-float", 1}, {"play17-fire-midfall", 17}, {"play17-fire-bombers", 17},
 		{"play23-water-midfall", 23}, {"play17-crater-top", 17}, {"play16-crater-bottom", 16},
 	} {
